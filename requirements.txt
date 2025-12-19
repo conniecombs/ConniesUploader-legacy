@@ -1,0 +1,10 @@
+customtkinter
+tkinterdnd2
+Pillow
+httpx[http2]
+requests-toolbelt
+beautifulsoup4
+keyring
+loguru
+pyperclip
+pyinstaller
