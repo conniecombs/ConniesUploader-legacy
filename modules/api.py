@@ -18,14 +18,15 @@ from bs4 import BeautifulSoup
 from . import config
 from loguru import logger
 
-def create_resilient_client(retries=3):
+def create_resilient_client(retries=None):
     """
     Creates an httpx.Client with automatic retries and HTTP/2 support.
     """
+    if retries is None:
+        retries = config.HTTP_RETRY_COUNT
     transport = httpx.HTTPTransport(retries=retries)
     # http2=True enables modern, faster connections.
-    # timeout=60.0 gives ample time for server responses.
-    client = httpx.Client(transport=transport, http2=True, timeout=60.0)
+    client = httpx.Client(transport=transport, http2=True, timeout=config.HTTP_TIMEOUT_SECONDS)
     client.headers.update({'User-Agent': config.USER_AGENT})
     return client
 

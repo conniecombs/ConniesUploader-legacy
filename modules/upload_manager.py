@@ -137,14 +137,14 @@ class UploadManager:
                 
                 def read_monitor_chunks(monitor):
                     while True:
-                        chunk = monitor.read(8192)
+                        chunk = monitor.read(config.UPLOAD_CHUNK_SIZE)
                         if not chunk: break
                         yield chunk
-                
+
                 if 'Content-Length' not in headers and hasattr(data, 'len'):
                     headers['Content-Length'] = str(data.len)
 
-                r = client.post(url, headers=headers, content=read_monitor_chunks(data), timeout=300)
+                r = client.post(url, headers=headers, content=read_monitor_chunks(data), timeout=config.UPLOAD_TIMEOUT_SECONDS)
                 
                 resp = r.text if service == 'vipr.im' else r.json()
                 img, thumb = uploader.parse_response(resp)

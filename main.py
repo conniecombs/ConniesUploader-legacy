@@ -29,7 +29,7 @@ from modules.utils import ContextUtils
 from loguru import logger
 
 # Tkinter can hit the default limit (1000) when rendering thousands of widgets.
-sys.setrecursionlimit(3000) 
+sys.setrecursionlimit(config.RECURSION_LIMIT) 
 
 # Configure CustomTkinter
 ctk.set_appearance_mode("System")
@@ -49,8 +49,8 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.var_show_previews = tk.BooleanVar(value=True) # <--- NEW: Preview Toggle
 
         # ThreadPoolExecutor for Thumbnail Generation
-        # Max workers = 4 means only 4 folders get processed at a time.
-        self.thumb_executor = ThreadPoolExecutor(max_workers=4)
+        # Max workers controls how many folders are processed concurrently.
+        self.thumb_executor = ThreadPoolExecutor(max_workers=config.THUMBNAIL_WORKER_THREADS)
 
         # Icon
         try:
@@ -622,9 +622,9 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 except: pil_image = None
             
             self.ui_queue.put(('add', f, pil_image, group_widget))
-            
+
             # If skipping previews, run much faster (shorter sleep)
-            time.sleep(0.01 if show_previews else 0.001)
+            time.sleep(config.THUMBNAIL_SLEEP_WITH_PREVIEW if show_previews else config.THUMBNAIL_SLEEP_NO_PREVIEW)
 
     # --- Upload Logic ---
     def start_upload(self):
@@ -694,7 +694,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
             except queue.Empty: pass
 
             # 2. Process UI Queue (Thumbnails generation)
-            ui_limit = 20
+            ui_limit = config.UI_QUEUE_BATCH_SIZE
             try:
                 while ui_limit > 0:
                     a, f, p, g = self.ui_queue.get_nowait()
@@ -703,7 +703,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
             except queue.Empty: pass
 
             # 3. Process Progress Queue (Upload progress status)
-            prog_limit = 50
+            prog_limit = config.PROGRESS_QUEUE_BATCH_SIZE
             try:
                 while prog_limit > 0:
                     item = self.progress_queue.get_nowait()
@@ -740,7 +740,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         except Exception as e:
             print(f"UI Loop Error: {e}")
         finally:
-            self.after(20, self.update_ui_loop)
+            self.after(config.UI_UPDATE_INTERVAL_MS, self.update_ui_loop)
 
     def _create_row(self, fp, pil_image, group_widget):
         group_widget.add_file(fp)
