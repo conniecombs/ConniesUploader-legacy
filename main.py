@@ -8,6 +8,7 @@ import threading
 import queue
 import os
 import sys
+import gc
 import keyring
 import pyperclip
 import subprocess
@@ -638,15 +639,19 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _thumb_worker(self, files, group_widget, show_previews):
         for f in files:
             if f in self.file_widgets: continue
-            
+
             pil_image = None
             if show_previews:
                 try:
-                    img = Image.open(f)
-                    img.thumbnail(config.UI_THUMB_SIZE)
-                    pil_image = img
-                except: pil_image = None
-            
+                    # Use context manager to ensure file is properly closed
+                    with Image.open(f) as img:
+                        img.thumbnail(config.UI_THUMB_SIZE)
+                        # Create a copy since original will be closed
+                        pil_image = img.copy()
+                except Exception as e:
+                    logger.debug(f"Failed to create thumbnail for {f}: {e}")
+                    pil_image = None
+
             self.ui_queue.put(('add', f, pil_image, group_widget))
 
             # If skipping previews, run much faster (shorter sleep)
@@ -847,6 +852,16 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 msg += " All output text copied to clipboard."
             messagebox.showinfo("Done", msg)
 
+        # Memory cleanup after upload completion
+        # Clear results to free memory (they're already saved to files)
+        self.results.clear()
+        self.pix_galleries_to_finalize.clear()
+
+        # Trigger garbage collection for large batches
+        if self.upload_total > 100:
+            gc.collect()
+            logger.info(f"Memory cleanup: Processed {self.upload_total} files, triggered garbage collection")
+
     def stop_upload(self):
         self.cancel_event.set()
         self.lbl_eta.configure(text="Stopping...")
@@ -964,11 +979,23 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.upload_total = 0
         self.current_output_files = []
         self.clipboard_buffer = []
+
+        # Track count before clearing for GC decision
+        file_count = len(self.file_widgets)
+
         for grp in self.groups:
             grp.destroy()
         self.groups.clear()
         self.file_widgets.clear()
+
+        # Properly clean up image references to free memory
         self.image_refs.clear()
+
+        # Force garbage collection to free memory immediately for large batches
+        if file_count > 100:
+            gc.collect()
+            logger.info(f"Garbage collection triggered after clearing {file_count} files")
+
         self.overall_progress.set(0)
         self.lbl_eta.configure(text="Cleared.")
         self.btn_start.configure(state="normal")
