@@ -28,6 +28,7 @@ from modules.template_manager import TemplateManager, TemplateEditor
 from modules.upload_manager import UploadManager
 from modules.utils import ContextUtils
 from modules.path_validator import PathValidator, PathValidationError
+from modules.error_handler import get_error_handler, ErrorSeverity
 from loguru import logger
 
 # Tkinter can hit the default limit (1000) when rendering thousands of widgets.
@@ -716,7 +717,17 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def update_ui_loop(self):
         try:
-            # 1. Process Result Queue (Images finished uploading)
+            # 1. Process Error Notifications (show to user)
+            error_handler = get_error_handler()
+            notification_limit = 3  # Max 3 notifications per cycle to avoid blocking UI
+            shown = 0
+            while shown < notification_limit and error_handler.has_notifications():
+                notification = error_handler.get_notification(block=False)
+                if notification:
+                    self._show_notification(notification)
+                    shown += 1
+
+            # 2. Process Result Queue (Images finished uploading)
             try:
                 while True:
                     fp, img, thumb = self.result_queue.get_nowait()
@@ -724,7 +735,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
                         self.results.append((fp, img, thumb))
             except queue.Empty: pass
 
-            # 2. Process UI Queue (Thumbnails generation)
+            # 3. Process UI Queue (Thumbnails generation)
             ui_limit = config.UI_QUEUE_BATCH_SIZE
             try:
                 while ui_limit > 0:
@@ -733,7 +744,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
                     ui_limit -= 1
             except queue.Empty: pass
 
-            # 3. Process Progress Queue (Upload progress status)
+            # 4. Process Progress Queue (Upload progress status)
             prog_limit = config.PROGRESS_QUEUE_BATCH_SIZE
             try:
                 while prog_limit > 0:
@@ -1000,7 +1011,50 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.lbl_eta.configure(text="Cleared.")
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
-    
+
+    def _show_notification(self, notification):
+        """
+        Display a notification to the user based on severity.
+
+        Args:
+            notification: UserNotification object from error handler
+        """
+        try:
+            # Determine icon type based on severity
+            if notification.severity == ErrorSeverity.CRITICAL:
+                icon = messagebox.ERROR
+            elif notification.severity == ErrorSeverity.ERROR:
+                icon = messagebox.ERROR
+            elif notification.severity == ErrorSeverity.WARNING:
+                icon = messagebox.WARNING
+            else:
+                icon = messagebox.INFO
+
+            # Create message with optional details
+            message = notification.message
+            if notification.show_details_button and notification.details:
+                # Truncate long details for display
+                details_preview = notification.details[:200]
+                if len(notification.details) > 200:
+                    details_preview += "..."
+                message += f"\n\nDetails:\n{details_preview}"
+
+            # Show notification (non-blocking)
+            if icon == messagebox.ERROR:
+                messagebox.showerror(notification.title, message, parent=self)
+            elif icon == messagebox.WARNING:
+                messagebox.showwarning(notification.title, message, parent=self)
+            else:
+                messagebox.showinfo(notification.title, message, parent=self)
+
+            # Log to execution log as well
+            self.log(f"[{notification.severity.value.upper()}] {notification.title}: {notification.message}")
+
+        except Exception as e:
+            # Fallback if notification display fails
+            logger.error(f"Failed to show notification: {e}")
+            self.log(f"Error: {notification.title} - {notification.message}")
+
     def log(self, msg):
         config.logger.info(msg)
         if self.log_window_ref and self.log_window_ref.winfo_exists():
