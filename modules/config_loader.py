@@ -72,13 +72,19 @@ class AppConfig:
             self.performance = PerformanceConfig()
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
-        return {
+        """Convert to dictionary for YAML serialization"""
+        result = {
             'network': asdict(self.network),
             'ui': asdict(self.ui),
             'threading': asdict(self.threading),
             'performance': asdict(self.performance)
         }
+
+        # Convert tuples to lists for YAML compatibility
+        if isinstance(result['ui']['thumbnail_size'], tuple):
+            result['ui']['thumbnail_size'] = list(result['ui']['thumbnail_size'])
+
+        return result
 
 
 class ConfigLoader:
