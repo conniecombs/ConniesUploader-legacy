@@ -4,12 +4,16 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from . import api
 from . import config
+from .config_loader import get_config_loader
 from .error_handler import handle_upload_error, ErrorContext, ErrorSeverity, get_error_handler, handle_network_error
 from .retry_utils import retry_on_network_error, RetryConfig, is_retryable_error
 from loguru import logger
 
 # Thread-local storage for HTTP clients (replaces the global one in main.py)
 thread_local_data = threading.local()
+
+# Load application configuration
+_app_config = get_config_loader().config
 
 def get_thread_client():
     if not hasattr(thread_local_data, "client"):
@@ -139,7 +143,7 @@ class UploadManager:
 
                 def read_monitor_chunks(monitor):
                     while True:
-                        chunk = monitor.read(config.UPLOAD_CHUNK_SIZE)
+                        chunk = monitor.read(_app_config.network.chunk_size)
                         if not chunk: break
                         yield chunk
 
@@ -148,7 +152,7 @@ class UploadManager:
 
                 # Wrap upload in retry decorator with custom config
                 retry_config = RetryConfig(
-                    max_attempts=config.HTTP_RETRY_COUNT,
+                    max_attempts=_app_config.network.retry_count,
                     base_delay=2.0,  # Start with 2 second delay
                     max_delay=30.0,  # Cap at 30 seconds
                     exponential_base=2.0  # Double the delay each retry
@@ -162,7 +166,7 @@ class UploadManager:
                         url,
                         headers=headers,
                         content=read_monitor_chunks(data),
-                        timeout=config.UPLOAD_TIMEOUT_SECONDS
+                        timeout=_app_config.network.upload_timeout_seconds
                     )
 
                 try:

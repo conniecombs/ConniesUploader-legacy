@@ -16,18 +16,26 @@ import httpx
 from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
 from bs4 import BeautifulSoup
 from . import config
+from .config_loader import get_config_loader
 from .error_handler import handle_authentication_error, handle_network_error, ErrorContext, ErrorSeverity, get_error_handler
 from loguru import logger
+
+# Load application configuration
+_app_config = get_config_loader().config
 
 def create_resilient_client(retries=None):
     """
     Creates an httpx.Client with automatic retries and HTTP/2 support.
     """
     if retries is None:
-        retries = config.HTTP_RETRY_COUNT
+        retries = _app_config.network.retry_count
     transport = httpx.HTTPTransport(retries=retries)
     # http2=True enables modern, faster connections.
-    client = httpx.Client(transport=transport, http2=True, timeout=config.HTTP_TIMEOUT_SECONDS)
+    client = httpx.Client(
+        transport=transport,
+        http2=_app_config.network.http2_enabled,
+        timeout=_app_config.network.timeout_seconds
+    )
     client.headers.update({'User-Agent': config.USER_AGENT})
     return client
 

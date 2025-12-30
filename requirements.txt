@@ -9,3 +9,4 @@ loguru
 pyperclip
 pyinstaller
 tenacity
+pyyaml
