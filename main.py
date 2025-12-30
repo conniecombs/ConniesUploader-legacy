@@ -29,6 +29,7 @@ from modules.upload_manager import UploadManager
 from modules.utils import ContextUtils
 from modules.path_validator import PathValidator, PathValidationError
 from modules.error_handler import get_error_handler, ErrorSeverity
+from modules.app_state import AppState, StateManager
 from loguru import logger
 
 # Tkinter can hit the default limit (1000) when rendering thousands of widgets.
@@ -72,38 +73,43 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.settings_mgr = SettingsManager()
         self.settings = self.settings_mgr.load()
         self.template_mgr = TemplateManager()
-        
-        # State
-        self.progress_queue = queue.Queue()
-        self.ui_queue = queue.Queue()
-        self.result_queue = queue.Queue()
-        
-        self.cancel_event = threading.Event()
-        self.lock = threading.Lock()
-        
-        # Initialize UploadManager (Modular Logic)
-        self.upload_manager = UploadManager(self.progress_queue, self.result_queue, self.cancel_event)
-        
-        self.file_widgets = {} 
-        self.groups = []       
-        self.results = []
-        self.log_cache = []
-        self.image_refs = []
-        self.log_window_ref = None
-        self.clipboard_buffer = []
-        self.upload_total = 0
-        self.upload_count = 0
-        self.is_uploading = False
-        self.current_output_files = []
-        self.pix_galleries_to_finalize = [] 
-        
-        # Auth
-        self.turbo_cookies = None
-        self.turbo_endpoint = None
-        self.turbo_upload_id = None
-        self.vipr_session = None
-        self.vipr_meta = None
-        self.vipr_galleries_map = {}
+
+        # Centralized State Management (replaces 30+ scattered variables)
+        self.state = AppState()
+        self.state_mgr = StateManager(self.state)
+
+        # Initialize UploadManager with state queues
+        self.upload_manager = UploadManager(
+            self.state.queues.progress_queue,
+            self.state.queues.result_queue,
+            self.state.upload.cancel_event
+        )
+
+        # Backward compatibility aliases (will be gradually removed)
+        # These allow existing code to work while we refactor
+        self.progress_queue = self.state.queues.progress_queue
+        self.ui_queue = self.state.queues.ui_queue
+        self.result_queue = self.state.queues.result_queue
+        self.cancel_event = self.state.upload.cancel_event
+        self.lock = self.state.lock
+        self.file_widgets = self.state.files.file_widgets
+        self.groups = self.state.files.groups
+        self.results = self.state.results.results
+        self.log_cache = self.state.ui.log_cache
+        self.image_refs = self.state.files.image_refs
+        self.log_window_ref = self.state.ui.log_window_ref
+        self.clipboard_buffer = self.state.results.clipboard_buffer
+        self.current_output_files = self.state.results.current_output_files
+        self.pix_galleries_to_finalize = self.state.results.pix_galleries_to_finalize
+        self.turbo_cookies = self.state.auth.turbo_cookies
+        self.turbo_endpoint = self.state.auth.turbo_endpoint
+        self.turbo_upload_id = self.state.auth.turbo_upload_id
+        self.vipr_session = self.state.auth.vipr_session
+        self.vipr_meta = self.state.auth.vipr_meta
+        self.vipr_galleries_map = self.state.auth.vipr_galleries_map
+        self.upload_total = self.state.upload.upload_total
+        self.upload_count = self.state.upload.upload_count
+        self.is_uploading = self.state.upload.is_uploading
 
         self._load_credentials()
         self._create_menu()
