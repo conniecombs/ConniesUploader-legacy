@@ -20,6 +20,7 @@ from .app_state import AppState
 from .upload_manager import UploadManager
 from .template_manager import TemplateManager
 from .config_loader import get_config_loader
+from .upload_history import get_upload_history, UploadRecord
 
 
 @dataclass
@@ -67,11 +68,13 @@ class UploadCoordinator:
         self.upload_manager = upload_manager
         self.template_manager = template_manager
         self.app_config = get_config_loader().config
+        self.upload_history = get_upload_history()
 
         # Upload state
         self.is_uploading = False
         self.upload_total = 0
         self.upload_count = 0
+        self.current_session_id: Optional[str] = None
 
         # Gallery and output management
         self.pix_galleries_to_finalize: List[Dict[str, Any]] = []
@@ -141,6 +144,10 @@ class UploadCoordinator:
             self.upload_count = 0
             self.is_uploading = True
 
+            # Start upload history session
+            service = settings.get('service', 'unknown')
+            self.current_session_id = self.upload_history.start_session(service, self.upload_total)
+
             # Update file states to 'queued'
             for files in pending_by_group.values():
                 for fp in files:
@@ -156,7 +163,7 @@ class UploadCoordinator:
             # Start the upload batch
             self.upload_manager.start_batch(pending_by_group, settings, credentials)
 
-            logger.info(f"Upload started: {self.upload_total} files across {len(pending_by_group)} groups")
+            logger.info(f"Upload started: {self.upload_total} files across {len(pending_by_group)} groups (session: {self.current_session_id})")
             return True
 
         except Exception as e:
@@ -214,7 +221,11 @@ class UploadCoordinator:
             gc.collect()
             logger.info(f"Memory cleanup: Processed {self.upload_total} files, triggered GC")
 
-        logger.info(f"Upload finished: {self.upload_count}/{self.upload_total} completed")
+        # End upload history session
+        status = 'completed' if self.upload_count >= self.upload_total else 'interrupted'
+        self.upload_history.end_session(status)
+
+        logger.info(f"Upload finished: {self.upload_count}/{self.upload_total} completed (session: {self.current_session_id})")
 
     def increment_upload_count(self) -> int:
         """
