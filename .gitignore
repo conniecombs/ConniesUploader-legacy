@@ -40,3 +40,4 @@ Thumbs.db
 Output/
 *.log
 config.yaml
+.coverage
