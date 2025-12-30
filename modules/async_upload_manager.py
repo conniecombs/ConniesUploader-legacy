@@ -8,12 +8,14 @@ Significantly better resource utilization than ThreadPoolExecutor.
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from . import api
 from . import config
 from .config_loader import get_config_loader
 from .error_handler import handle_upload_error, handle_network_error
 from .retry_utils import is_retryable_error
+from .plugin_adapter import get_service_registry
 from loguru import logger
 
 
@@ -36,6 +38,7 @@ class AsyncUploadManager:
         self.progress_queue = progress_queue
         self.result_queue = result_queue
         self.cancel_event = cancel_event
+        self.service_registry = get_service_registry()
 
     def start_batch(self, pending_by_group, cfg, creds):
         """
@@ -199,6 +202,12 @@ class AsyncUploadManager:
 
     def _create_uploader(self, service, fp, is_first, cfg, pix_data, callback, client):
         """Create appropriate uploader instance based on service."""
+        # Check if this is a plugin service
+        if self.service_registry.is_plugin_service(service):
+            logger.info(f"Using plugin service: {service}")
+            return self._create_plugin_uploader(service, fp, cfg, callback)
+
+        # Built-in services
         if service == "imx.to":
             th = "600" if (is_first and cfg['imx_cover']) else cfg['imx_thumb']
             return api.ImxUploader(
@@ -235,6 +244,24 @@ class AsyncUploadManager:
             )
 
         return None
+
+    def _create_plugin_uploader(self, service_name, fp, cfg, callback):
+        """Create a plugin uploader wrapped in an adapter."""
+        # Get plugin credentials from config
+        plugin_creds = cfg.get('plugin_credentials', {}).get(service_name, {})
+
+        # Create plugin instance
+        plugin = self.service_registry.get_plugin_instance(
+            service_name,
+            credentials=plugin_creds,
+            config=cfg
+        )
+
+        if not plugin:
+            raise Exception(f"Failed to create plugin instance for {service_name}")
+
+        # Wrap plugin in adapter to match existing uploader interface
+        return PluginUploaderAdapter(plugin, fp, callback)
 
     async def _perform_async_upload(self, uploader, fp, cfg, client):
         """
@@ -290,3 +317,89 @@ class AsyncUploadManager:
                     if is_retryable_error(e):
                         handle_network_error(e, "Upload", service)
                     raise
+
+
+class PluginUploaderAdapter:
+    """
+    Adapter to make plugin uploaders compatible with the existing uploader interface.
+
+    Plugins use a different interface than built-in uploaders, so this adapter
+    translates between the two.
+    """
+
+    def __init__(self, plugin, file_path, progress_callback):
+        """
+        Initialize adapter.
+
+        Args:
+            plugin: ImageHostPlugin instance
+            file_path: Path to file to upload
+            progress_callback: Progress callback function
+        """
+        self.plugin = plugin
+        self.file_path = Path(file_path)
+        self.progress_callback = progress_callback
+        self._result = None
+
+    def get_request_params(self):
+        """
+        Get upload request parameters.
+
+        For plugins, we perform the upload directly in this method
+        and store the result for later retrieval by parse_response().
+
+        This is a workaround to adapt the plugin interface to the existing
+        uploader interface which expects separate get_request_params() and
+        parse_response() calls.
+
+        Returns:
+            Dummy values (upload is already done)
+        """
+        try:
+            # Plugins handle upload internally, so we call upload here
+            self._result = self.plugin.upload(self.file_path, self._progress_wrapper)
+
+            # Return dummy values since upload is already done
+            return ("https://dummy.com", b"", {})
+
+        except Exception as e:
+            logger.error(f"Plugin upload failed: {e}")
+            raise
+
+    def _progress_wrapper(self, bytes_sent, total_bytes):
+        """Wrap plugin progress callback to match expected interface."""
+        if self.progress_callback:
+            # Create a mock monitor object with the expected attributes
+            class MockMonitor:
+                def __init__(self, bytes_read, length):
+                    self.bytes_read = bytes_read
+                    self.len = length
+
+            monitor = MockMonitor(bytes_sent, total_bytes)
+            self.progress_callback(monitor)
+
+    def parse_response(self, response_data):
+        """
+        Parse upload response.
+
+        Since the upload was already done in get_request_params(),
+        we just return the stored result here.
+
+        Args:
+            response_data: Ignored (upload already done)
+
+        Returns:
+            Tuple of (image_url, thumb_url)
+        """
+        if self._result:
+            return (self._result.image_url, self._result.thumb_url)
+
+        raise Exception("Plugin upload failed: no result available")
+
+    def close(self):
+        """Cleanup plugin resources."""
+        if self.plugin:
+            try:
+                self.plugin.cleanup()
+            except Exception as e:
+                logger.warning(f"Plugin cleanup error: {e}")

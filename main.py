@@ -34,6 +34,7 @@ from modules.error_handler import get_error_handler, ErrorSeverity
 from modules.app_state import AppState, StateManager
 from modules.config_loader import get_config_loader
 from modules.thumbnail_cache import get_thumbnail_cache
+from modules.plugin_adapter import get_service_registry
 from loguru import logger
 
 # Load user configuration (YAML-based, optional)
@@ -81,6 +82,10 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.settings_mgr = SettingsManager()
         self.settings = self.settings_mgr.load()
         self.template_mgr = TemplateManager()
+
+        # Plugin System - Initialize service registry
+        self.service_registry = get_service_registry()
+        logger.info(f"Loaded services: {self.service_registry.get_service_names()}")
 
         # Centralized State Management (replaces 30+ scattered variables)
         self.app_state = AppState()
@@ -440,13 +445,14 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         ctk.CTkButton(util_grid, text="Retry Failed", command=self.retry_failed, width=100).pack(side="left", padx=2)
         ctk.CTkButton(util_grid, text="Clear List", command=self.clear_list, width=100).pack(side="right", padx=2)
 
-        # Tabs
+        # Tabs - Dynamically create for all services (built-in + plugins)
         self.notebook = ctk.CTkTabview(self.settings_frame_container)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
-        self.notebook.add("imx.to")
-        self.notebook.add("pixhost.to")
-        self.notebook.add("turboimagehost")
-        self.notebook.add("vipr.im")
+
+        # Create tabs for all available services
+        all_services = self.service_registry.get_service_names()
+        for service_name in all_services:
+            self.notebook.add(service_name)
 
         # Right Panel (Files)
         right_panel = ctk.CTkFrame(main_container)
@@ -466,10 +472,14 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.overall_progress.set(0)
         self.overall_progress.pack(fill="x", pady=5)
 
+        # Build tabs for built-in services
         self._build_imx_tab()
         self._build_pix_tab()
         self._build_turbo_tab()
         self._build_vipr_tab()
+
+        # Build tabs for plugin services
+        self._build_plugin_tabs()
 
     # --- Tab Builders ---
     def _build_imx_tab(self):
@@ -549,6 +559,112 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.cb_vipr_gallery = MouseWheelComboBox(p, variable=self.var_vipr_gallery, values=["None"])
         self.cb_vipr_gallery.pack(fill="x")
 
+    def _build_plugin_tabs(self):
+        """Dynamically build tabs for plugin services."""
+        # Dictionary to store plugin credential variables
+        if not hasattr(self, 'plugin_cred_vars'):
+            self.plugin_cred_vars = {}
+
+        # Get all plugin service names
+        plugin_names = self.service_registry.plugin_manager.get_plugin_names()
+
+        for plugin_name in plugin_names:
+            try:
+                # Get the tab for this plugin
+                p = self.notebook.tab(plugin_name)
+
+                # Get metadata and credential fields for this plugin
+                metadata = self.service_registry.get_plugin_metadata(plugin_name)
+                cred_fields = self.service_registry.get_credential_fields(plugin_name)
+
+                # Display plugin info
+                if metadata:
+                    ctk.CTkLabel(
+                        p,
+                        text=f"{metadata.get('description', plugin_name)}",
+                        font=("Segoe UI", 11),
+                        wraplength=250
+                    ).pack(pady=5)
+
+                    # Show authentication requirement
+                    if metadata.get('requires_authentication'):
+                        ctk.CTkLabel(p, text="Requires Credentials", text_color="red").pack(pady=2)
+
+                # Create credential input fields dynamically
+                self.plugin_cred_vars[plugin_name] = {}
+
+                if cred_fields:
+                    for field_name, field_meta in cred_fields.items():
+                        # Label
+                        label_text = field_meta.get('label', field_name)
+                        if field_meta.get('required'):
+                            label_text += " *"
+
+                        ctk.CTkLabel(p, text=label_text).pack(anchor="w", pady=(10, 2))
+
+                        # Input field
+                        var = ctk.StringVar()
+                        show_char = "*" if field_meta.get('type') == 'password' else None
+
+                        entry = ctk.CTkEntry(
+                            p,
+                            textvariable=var,
+                            show=show_char,
+                            placeholder_text=field_meta.get('placeholder', '')
+                        )
+                        entry.pack(fill="x")
+
+                        # Store variable for later access
+                        self.plugin_cred_vars[plugin_name][field_name] = var
+
+                        # Help text
+                        if field_meta.get('help_text'):
+                            ctk.CTkLabel(
+                                p,
+                                text=field_meta.get('help_text'),
+                                font=("Segoe UI", 9),
+                                text_color="gray",
+                                wraplength=250
+                            ).pack(anchor="w", pady=2)
+
+                        # Help URL button
+                        if field_meta.get('help_url'):
+                            ctk.CTkButton(
+                                p,
+                                text="Get Credentials →",
+                                command=lambda url=field_meta.get('help_url'): self._open_url(url),
+                                fg_color="gray",
+                                hover_color="#666",
+                                height=24
+                            ).pack(fill="x", pady=5)
+
+                # Gallery support indicator
+                if metadata and metadata.get('supports_galleries'):
+                    ctk.CTkLabel(
+                        p,
+                        text="✓ Supports Galleries",
+                        text_color="green",
+                        font=("Segoe UI", 10)
+                    ).pack(anchor="w", pady=(10, 0))
+
+                # Max file size info
+                if metadata:
+                    max_size = metadata.get('max_file_size_mb', 10)
+                    ctk.CTkLabel(
+                        p,
+                        text=f"Max file size: {max_size}MB",
+                        font=("Segoe UI", 9),
+                        text_color="gray"
+                    ).pack(anchor="w", pady=2)
+
+            except Exception as e:
+                logger.error(f"Failed to build tab for plugin '{plugin_name}': {e}")
+
+    def _open_url(self, url):
+        """Open URL in default browser."""
+        import webbrowser
+        webbrowser.open(url)
+
     # --- Settings Methods ---
     def _apply_settings(self):
         s = self.settings
@@ -602,6 +718,15 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         vipr_gal_name = self.cb_vipr_gallery.get()
         vipr_id = self.vipr_galleries_map.get(vipr_gal_name, "0")
 
+        # Gather plugin credentials
+        plugin_credentials = {}
+        if hasattr(self, 'plugin_cred_vars'):
+            for plugin_name, cred_vars in self.plugin_cred_vars.items():
+                plugin_credentials[plugin_name] = {
+                    field_name: var.get()
+                    for field_name, var in cred_vars.items()
+                }
+
         return {
             "service": self.notebook.get(),
             "imx_thumb": self.var_imx_thumb.get(),
@@ -629,7 +754,8 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
             "auto_gallery": self.var_auto_gallery.get(),
             "show_previews": self.var_show_previews.get(), # Save Preference
             "gallery_id": self.ent_imx_gal.get(),
-            "pix_gallery_hash": self.ent_pix_hash.get()
+            "pix_gallery_hash": self.ent_pix_hash.get(),
+            "plugin_credentials": plugin_credentials  # Add plugin credentials
         }
 
     # --- File Management ---
