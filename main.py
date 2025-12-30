@@ -83,49 +83,49 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.template_mgr = TemplateManager()
 
         # Centralized State Management (replaces 30+ scattered variables)
-        self.state = AppState()
-        self.state_mgr = StateManager(self.state)
+        self.app_state = AppState()
+        self.app_state_mgr = StateManager(self.app_state)
 
         # Initialize AsyncUploadManager with state queues (performance-optimized)
         # Uses async/await for better concurrency and lower resource usage
         self.upload_manager = AsyncUploadManager(
-            self.state.queues.progress_queue,
-            self.state.queues.result_queue,
-            self.state.upload.cancel_event
+            self.app_state.queues.progress_queue,
+            self.app_state.queues.result_queue,
+            self.app_state.upload.cancel_event
         )
 
         # Initialize UploadCoordinator (business logic layer)
         self.coordinator = UploadCoordinator(
-            self.state,
+            self.app_state,
             self.upload_manager,
             self.template_mgr
         )
 
         # Backward compatibility aliases (will be gradually removed)
         # These allow existing code to work while we refactor
-        self.progress_queue = self.state.queues.progress_queue
-        self.ui_queue = self.state.queues.ui_queue
-        self.result_queue = self.state.queues.result_queue
-        self.cancel_event = self.state.upload.cancel_event
-        self.lock = self.state.lock
-        self.file_widgets = self.state.files.file_widgets
-        self.groups = self.state.files.groups
-        self.results = self.state.results.results
-        self.log_cache = self.state.ui.log_cache
-        self.image_refs = self.state.files.image_refs
-        self.log_window_ref = self.state.ui.log_window_ref
-        self.clipboard_buffer = self.state.results.clipboard_buffer
-        self.current_output_files = self.state.results.current_output_files
-        self.pix_galleries_to_finalize = self.state.results.pix_galleries_to_finalize
-        self.turbo_cookies = self.state.auth.turbo_cookies
-        self.turbo_endpoint = self.state.auth.turbo_endpoint
-        self.turbo_upload_id = self.state.auth.turbo_upload_id
-        self.vipr_session = self.state.auth.vipr_session
-        self.vipr_meta = self.state.auth.vipr_meta
-        self.vipr_galleries_map = self.state.auth.vipr_galleries_map
-        self.upload_total = self.state.upload.upload_total
-        self.upload_count = self.state.upload.upload_count
-        self.is_uploading = self.state.upload.is_uploading
+        self.progress_queue = self.app_state.queues.progress_queue
+        self.ui_queue = self.app_state.queues.ui_queue
+        self.result_queue = self.app_state.queues.result_queue
+        self.cancel_event = self.app_state.upload.cancel_event
+        self.lock = self.app_state.lock
+        self.file_widgets = self.app_state.files.file_widgets
+        self.groups = self.app_state.files.groups
+        self.results = self.app_state.results.results
+        self.log_cache = self.app_state.ui.log_cache
+        self.image_refs = self.app_state.files.image_refs
+        self.log_window_ref = self.app_state.ui.log_window_ref
+        self.clipboard_buffer = self.app_state.results.clipboard_buffer
+        self.current_output_files = self.app_state.results.current_output_files
+        self.pix_galleries_to_finalize = self.app_state.results.pix_galleries_to_finalize
+        self.turbo_cookies = self.app_state.auth.turbo_cookies
+        self.turbo_endpoint = self.app_state.auth.turbo_endpoint
+        self.turbo_upload_id = self.app_state.auth.turbo_upload_id
+        self.vipr_session = self.app_state.auth.vipr_session
+        self.vipr_meta = self.app_state.auth.vipr_meta
+        self.vipr_galleries_map = self.app_state.auth.vipr_galleries_map
+        self.upload_total = self.app_state.upload.upload_total
+        self.upload_count = self.app_state.upload.upload_count
+        self.is_uploading = self.app_state.upload.is_uploading
 
         self._load_credentials()
         self._create_menu()
@@ -204,8 +204,8 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         """UI callback for upload progress updates."""
         if total > 0:
             self.overall_progress.set(current / total)
-            self.state.upload.upload_count = current
-            self.state.upload.upload_total = total
+            self.app_state.upload.upload_count = current
+            self.app_state.upload.upload_total = total
 
     def _on_status_update(self, status: str):
         """UI callback for status text updates."""
@@ -963,7 +963,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         if need_links_txt:
             try:
                 # Get group results for links
-                res_map = {r[0]: (r[1], r[2]) for r in self.state.results.results}
+                res_map = {r[0]: (r[1], r[2]) for r in self.app_state.results.results}
                 group_results = [res_map[fp] for fp in group.files if fp in res_map]
 
                 links_filename = f"{safe_title}_{ts}_links.txt"
