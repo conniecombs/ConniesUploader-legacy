@@ -1,0 +1,39 @@
+# Include documentation files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+include CONFIG_GUIDE.md
+include TESTING_GUIDE.md
+include PLUGIN_DEVELOPMENT_GUIDE.md
+
+# Include configuration examples
+include config.example.yaml
+include pytest.ini
+
+# Include icon
+include logo.ico
+
+# Include plugin system
+recursive-include plugins *.py
+
+# Include tests
+recursive-include tests *.py
+
+# Exclude compiled Python files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+
+# Exclude development files
+exclude .gitignore
+exclude ANALYSIS_AND_RECOMMENDATIONS.md
+exclude PR_DESCRIPTION.md
+exclude PR_DESCRIPTION_V2.5.md
+exclude FUTURE_IMPROVEMENTS.md
+
+# Exclude build artifacts
+prune build
+prune dist
+prune *.egg-info
