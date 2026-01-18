@@ -1,0 +1,205 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v2.5.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: ConniesUploader-Windows
+            asset_name: ConniesUploader-Windows.exe
+          - os: ubuntu-latest
+            artifact_name: ConniesUploader-Linux
+            asset_name: ConniesUploader-Linux
+          - os: macos-latest
+            artifact_name: ConniesUploader-macOS
+            asset_name: ConniesUploader-macOS.app
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Run tests
+      run: |
+        pip install pytest pytest-cov
+        pytest tests/ -v
+
+    - name: Build with PyInstaller (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        pyinstaller --name=ConniesUploader --onefile --windowed --icon=logo.ico --add-data "logo.ico;." --add-data "config.example.yaml;." --add-data "plugins;plugins" main.py
+
+    - name: Build with PyInstaller (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        pyinstaller --name=ConniesUploader --onefile --windowed --icon=logo.ico --add-data "logo.ico:." --add-data "config.example.yaml:." --add-data "plugins:plugins" main.py
+
+    - name: Build with PyInstaller (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        pyinstaller --name=ConniesUploader --onefile --windowed --icon=logo.ico --add-data "logo.ico:." --add-data "config.example.yaml:." --add-data "plugins:plugins" main.py
+
+    - name: Package artifacts (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir release
+        copy dist\ConniesUploader.exe release\
+        copy README.md release\
+        copy LICENSE release\
+        copy config.example.yaml release\
+        Compress-Archive -Path release\* -DestinationPath ${{ matrix.artifact_name }}.zip
+
+    - name: Package artifacts (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        mkdir release
+        cp dist/ConniesUploader release/ || cp -r dist/ConniesUploader.app release/
+        cp README.md release/
+        cp LICENSE release/
+        cp config.example.yaml release/
+        cd release && tar -czf ../${{ matrix.artifact_name }}.tar.gz *
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: |
+          ${{ matrix.artifact_name }}.zip
+          ${{ matrix.artifact_name }}.tar.gz
+        retention-days: 5
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display structure of downloaded files
+      run: ls -R artifacts/
+
+    - name: Extract version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Create Release Notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        ## Connie's Uploader v${{ steps.get_version.outputs.VERSION }}
+
+        ### Downloads
+
+        Choose the appropriate version for your platform:
+        - **Windows**: `ConniesUploader-Windows.zip`
+        - **Linux**: `ConniesUploader-Linux.tar.gz`
+        - **macOS**: `ConniesUploader-macOS.tar.gz`
+
+        ### What's New
+
+        See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for detailed changes.
+
+        ### Installation
+
+        1. Download the appropriate file for your platform
+        2. Extract the archive
+        3. Run `ConniesUploader` executable
+        4. (Optional) Copy `config.example.yaml` to `config.yaml` and customize settings
+
+        ### Requirements
+
+        - Python runtime not required (standalone executables)
+        - Supported platforms: Windows 10+, Ubuntu 20.04+, macOS 11+
+
+        ### Documentation
+
+        - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+        - [Configuration Guide](https://github.com/${{ github.repository }}/blob/main/CONFIG_GUIDE.md)
+        - [Plugin Development](https://github.com/${{ github.repository }}/blob/main/PLUGIN_DEVELOPMENT_GUIDE.md)
+        - [Security Policy](https://github.com/${{ github.repository }}/blob/main/SECURITY.md)
+
+        ### Support
+
+        For issues or questions, please visit the [Issues](https://github.com/${{ github.repository }}/issues) page.
+        EOF
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body_path: release_notes.md
+        files: |
+          artifacts/ConniesUploader-Windows/*.zip
+          artifacts/ConniesUploader-Linux/*.tar.gz
+          artifacts/ConniesUploader-macOS/*.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check distribution
+      run: twine check dist/*
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        skip-existing: true

@@ -1,5 +1,8 @@
 # Connie's Uploader Ultimate v2.5
 
+[![Tests](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/test.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/test.yml)
+[![Build and Release](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/release.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/release.yml)
+[![CodeQL](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/codeql.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/codeql.yml)
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-2.5.0-brightgreen)
@@ -166,6 +169,63 @@ pytest tests/test_thumbnail_cache.py -v
 ### Manual Testing
 
 See [TESTING_GUIDE.md](TESTING_GUIDE.md) for comprehensive manual testing checklist.
+
+## Building from Source
+
+### Build Executable
+
+Use the provided build script to create standalone executables:
+
+```bash
+# Install build dependencies
+pip install pyinstaller
+
+# Build for current platform
+python build.py
+
+# Clean build and rebuild
+python build.py --clean
+
+# Build in debug mode
+python build.py --debug
+```
+
+**Output:**
+- Executable in `dist/` directory
+- Release package: `ConniesUploader-{Platform}.{zip,tar.gz}`
+
+### Platform-Specific Notes
+
+**Windows:**
+- Produces `.exe` in `dist/`
+- Release package: `ConniesUploader-Windows.zip`
+
+**Linux:**
+- Produces binary in `dist/`
+- Release package: `ConniesUploader-Linux.tar.gz`
+- May require: `sudo apt install python3-tk`
+
+**macOS:**
+- Produces `.app` bundle in `dist/`
+- Release package: `ConniesUploader-macOS.tar.gz`
+
+### CI/CD
+
+Automated builds run on every release tag:
+
+```bash
+# Create and push a version tag
+git tag -a v2.5.0 -m "Release version 2.5.0"
+git push origin v2.5.0
+```
+
+This triggers:
+- ✅ Automated tests on all platforms (Python 3.8-3.12)
+- ✅ Build executables for Windows, Linux, macOS
+- ✅ Create GitHub release with binaries
+- ✅ Publish to PyPI (optional)
+
+See [.github/workflows/](.github/workflows/) for CI/CD configuration.
 
 ## Architecture
 
