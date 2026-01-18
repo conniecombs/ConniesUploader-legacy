@@ -6,6 +6,7 @@ Tests LRU caching, eviction, hit/miss tracking, and persistence.
 
 import pytest
 import os
+import time
 import tempfile
 from pathlib import Path
 from PIL import Image
@@ -85,9 +86,15 @@ class TestThumbnailCache:
         img.thumbnail((50, 50))
         cache.put(test_image, img.copy(), (50, 50))
 
+        # Small delay to ensure modification time changes (especially on Windows)
+        time.sleep(0.1)
+
         # Modify the file
         img_new = Image.new('RGB', (100, 100), color='blue')
         img_new.save(test_image)
+
+        # Small delay to ensure filesystem updates mtime
+        time.sleep(0.1)
 
         # Should be a cache miss (mtime changed)
         result = cache.get(test_image, (50, 50))

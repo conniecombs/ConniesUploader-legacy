@@ -41,6 +41,8 @@ class PathValidator:
         '/sbin',
         '/usr/bin',
         '/usr/sbin',
+        '/private/etc',      # macOS: /etc is symlink to /private/etc
+        '/private/var/root', # macOS root home
     ]
 
     @staticmethod
