@@ -1,6 +1,30 @@
 # Connie's Uploader Ultimate v2.5
 
+![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-2.5.0-brightgreen)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Tests](https://img.shields.io/badge/tests-76%20passed-success)
+![Coverage](https://img.shields.io/badge/coverage-75--92%25-brightgreen)
+
 A powerful, user-friendly desktop application for batch uploading images to multiple hosting services with advanced features like thumbnail caching, async uploads, and session tracking.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Plugin System](#plugin-system)
+- [Configuration](#configuration-guide)
+- [Testing](#testing)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
+
+---
 
 ## Features
 
@@ -29,6 +53,14 @@ A powerful, user-friendly desktop application for batch uploading images to mult
 - **Error Notifications**: Desktop notifications for failures
 - **Execution Log**: Detailed logging with filtering and export
 - **Dark/Light Theme**: Follows system appearance settings
+
+### Plugin System (v2.5)
+- **Extensible Architecture**: Add custom image hosting services without modifying core code
+- **Simple API**: Implement just 4 methods to create a plugin
+- **UI Integration**: Plugins automatically appear in service dropdown
+- **Full Documentation**: See [PLUGIN_DEVELOPMENT_GUIDE.md](PLUGIN_DEVELOPMENT_GUIDE.md)
+
+---
 
 ## Installation
 
@@ -281,14 +313,32 @@ pytest tests/ -v
 
 ### Contributing
 
-1. Create feature branch from `main`
-2. Implement changes with tests
-3. Run test suite: `pytest tests/`
-4. Submit pull request with description
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+**Quick Start:**
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. Make changes with tests
+4. Run test suite: `pytest tests/ -v`
+5. Commit changes (`git commit -m 'Add AmazingFeature'`)
+6. Push to branch (`git push origin feature/AmazingFeature`)
+7. Open a Pull Request
+
+See also:
+- [Code of Conduct](CODE_OF_CONDUCT.md) (if you have community guidelines)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-[Specify license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Summary:**
+- ✅ Commercial use allowed
+- ✅ Modification allowed
+- ✅ Distribution allowed
+- ✅ Private use allowed
+- ℹ️ License and copyright notice required
 
 ## Credits
 
@@ -304,9 +354,22 @@ pytest tests/ -v
 
 ## Support
 
+### Getting Help
+
 For issues, feature requests, or questions:
-- GitHub Issues: [Repository URL]
-- Documentation: See `TESTING_GUIDE.md` and `config.example.yaml`
+- **Bug Reports**: [Open an issue](https://github.com/conniecombs/ConniesUploader-legacy/issues/new?template=bug_report.md)
+- **Feature Requests**: [Request a feature](https://github.com/conniecombs/ConniesUploader-legacy/issues/new?template=feature_request.md)
+- **Security Issues**: See [SECURITY.md](SECURITY.md)
+- **General Questions**: [GitHub Discussions](https://github.com/conniecombs/ConniesUploader-legacy/discussions)
+
+### Documentation
+
+- **Configuration**: See [CONFIG_GUIDE.md](CONFIG_GUIDE.md) and [config.example.yaml](config.example.yaml)
+- **Testing**: See [TESTING_GUIDE.md](TESTING_GUIDE.md)
+- **Plugin Development**: See [PLUGIN_DEVELOPMENT_GUIDE.md](PLUGIN_DEVELOPMENT_GUIDE.md)
+- **Security**: See [SECURITY.md](SECURITY.md)
+- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Changelog**: See [CHANGELOG.md](CHANGELOG.md)
 
 ## Changelog
 
