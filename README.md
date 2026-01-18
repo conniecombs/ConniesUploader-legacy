@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-2.5.0-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-76%20passed-success)
+![Tests](https://img.shields.io/badge/tests-102%20passed-success)
 ![Coverage](https://img.shields.io/badge/coverage-75--92%25-brightgreen)
 
 A powerful, user-friendly desktop application for batch uploading images to multiple hosting services with advanced features like thumbnail caching, async uploads, and session tracking.
@@ -140,7 +140,7 @@ Version-2.5/
 │   ├── error_handler.py   # Error handling & notifications
 │   ├── app_state.py       # Application state management
 │   └── ...
-├── tests/                 # Pytest unit tests (76 tests, 75-92% coverage)
+├── tests/                 # Pytest unit tests (102 tests, 75-92% coverage)
 ├── config.yaml            # User configuration (optional)
 └── TESTING_GUIDE.md       # Manual testing checklist
 ```
@@ -439,7 +439,7 @@ For issues, feature requests, or questions:
 - ✨ Added upload history tracking with JSON persistence
 - ✨ Implemented YAML-based configuration system
 - 🔒 Enhanced security with path validation
-- 🧪 Added comprehensive test suite (76 tests, 75-92% coverage)
+- 🧪 Added comprehensive test suite (102 tests, 75-92% coverage)
 - 📊 Improved error handling and notifications
 - 🎨 Memory optimization for large batches
 
