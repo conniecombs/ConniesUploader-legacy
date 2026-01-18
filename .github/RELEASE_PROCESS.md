@@ -19,7 +19,7 @@ The project uses GitHub Actions for continuous integration and deployment:
 - Pull requests to `main` or `develop`
 
 **Actions:**
-- Runs tests on Python 3.8-3.12
+- Runs tests on Python 3.9-3.12
 - Tests on Windows, Linux, and macOS
 - Generates code coverage reports
 - Runs linting (flake8, black, mypy)

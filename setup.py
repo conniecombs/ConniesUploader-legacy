@@ -29,7 +29,6 @@ setup(
         "Topic :: Multimedia :: Graphics",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
@@ -39,7 +38,7 @@ setup(
         "Environment :: Win32 (MS Windows)",
         "Environment :: MacOS X",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=[
         "customtkinter>=5.0.0",
         "tkinterdnd2>=0.3.0",
