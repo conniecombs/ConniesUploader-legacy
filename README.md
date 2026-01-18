@@ -3,7 +3,7 @@
 [![Tests](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/test.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/test.yml)
 [![Build and Release](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/release.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/release.yml)
 [![CodeQL](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/codeql.yml/badge.svg)](https://github.com/conniecombs/ConniesUploader-legacy/actions/workflows/codeql.yml)
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-2.5.0-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
@@ -68,7 +68,7 @@ A powerful, user-friendly desktop application for batch uploading images to mult
 ## Installation
 
 ### Requirements
-- Python 3.8+
+- Python 3.9+
 - Linux, Windows, or macOS
 
 ### Dependencies
@@ -220,7 +220,7 @@ git push origin v2.5.0
 ```
 
 This triggers:
-- ✅ Automated tests on all platforms (Python 3.8-3.12)
+- ✅ Automated tests on all platforms (Python 3.9-3.12)
 - ✅ Build executables for Windows, Linux, macOS
 - ✅ Create GitHub release with binaries
 - ✅ Publish to PyPI (optional)

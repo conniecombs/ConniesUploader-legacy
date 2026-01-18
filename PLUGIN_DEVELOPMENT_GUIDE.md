@@ -37,7 +37,7 @@ The plugin system allows developers to add support for new image hosting service
 ## Getting Started
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.9+
 - Basic understanding of HTTP requests
 - Familiarity with the target image hosting service's API
 
