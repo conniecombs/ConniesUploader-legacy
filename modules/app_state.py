@@ -91,7 +91,10 @@ class ServiceAuthState:
     turbo_cookies: Optional[Any] = None
     turbo_endpoint: Optional[str] = None
     turbo_upload_id: Optional[str] = None
+    # vipr_session kept for backward compatibility (authenticated httpx.Client).
+    # Prefer vipr_cookies (plain dict) for transfer into async/sync upload clients.
     vipr_session: Optional[Any] = None
+    vipr_cookies: Optional[Dict[str, str]] = None
     vipr_meta: Optional[Dict] = None
     vipr_galleries_map: Dict[str, str] = field(default_factory=dict)
 
@@ -104,8 +107,24 @@ class ServiceAuthState:
     def clear_vipr(self):
         """Clear Vipr service state"""
         self.vipr_session = None
+        self.vipr_cookies = None
         self.vipr_meta = None
         self.vipr_galleries_map.clear()
+
+    def set_vipr_auth(
+        self,
+        cookies: Optional[Dict[str, str]],
+        meta: Optional[Dict],
+        galleries_map: Optional[Dict[str, str]] = None,
+        session: Optional[Any] = None,
+    ):
+        """Atomically update Vipr auth state (cookies + metadata)."""
+        self.vipr_cookies = cookies
+        self.vipr_meta = meta
+        self.vipr_session = session
+        if galleries_map is not None:
+            self.vipr_galleries_map.clear()
+            self.vipr_galleries_map.update(galleries_map)
 
 
 @dataclass

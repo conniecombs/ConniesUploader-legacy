@@ -40,7 +40,7 @@ def create_resilient_client(retries=None):
     return client
 
 
-def create_async_client(retries=None):
+def create_async_client(retries=None, cookies=None):
     """
     Creates an httpx.AsyncClient for async/await uploads.
 
@@ -48,6 +48,10 @@ def create_async_client(retries=None):
     - Non-blocking I/O for better concurrency
     - Lower resource usage than threads
     - Built-in connection pooling
+
+    Args:
+        retries: Transport retry count
+        cookies: Optional cookie dict to attach (e.g. Vipr session)
     """
     if retries is None:
         retries = _app_config.network.retry_count
@@ -59,7 +63,43 @@ def create_async_client(retries=None):
         timeout=_app_config.network.timeout_seconds
     )
     client.headers.update({'User-Agent': config.USER_AGENT})
+    apply_cookies(client, cookies)
     return client
+
+
+def cookies_to_dict(cookies) -> Dict[str, str]:
+    """
+    Normalize httpx cookies / CookieJar / mapping into a plain str->str dict.
+
+    Plain dicts are safe to pass across threads and into both sync and async clients.
+    """
+    if not cookies:
+        return {}
+    if isinstance(cookies, dict):
+        return {str(k): str(v) for k, v in cookies.items()}
+    try:
+        return {str(k): str(v) for k, v in cookies.items()}
+    except Exception:
+        try:
+            # Fallback for jar-like objects
+            return {str(c.name): str(c.value) for c in cookies}
+        except Exception as e:
+            logger.warning(f"Could not convert cookies to dict: {e}")
+            return {}
+
+
+def apply_cookies(client, cookies: Optional[Dict[str, str]]) -> None:
+    """
+    Apply a cookie dict onto an httpx Client or AsyncClient.
+
+    No-op if cookies is empty/None.
+    """
+    if not cookies or client is None:
+        return
+    try:
+        client.cookies.update(cookies)
+    except Exception as e:
+        logger.warning(f"Failed to apply cookies to client: {e}")
 
 # --- Turbo Helper Functions ---
 
@@ -150,6 +190,7 @@ def vipr_login(user, password, client: httpx.Client = None):
         if should_close: client.close()
         return None
 
+
 def get_vipr_metadata(client: httpx.Client):
     """Scrapes Vipr homepage for upload URL, session ID, and galleries."""
     try:
@@ -189,6 +230,71 @@ def get_vipr_metadata(client: httpx.Client):
     except Exception as e:
         logger.error(f"Vipr Metadata Error: {e}")
         return None
+
+
+def ensure_vipr_auth(
+    username: str,
+    password: str,
+    existing_cookies: Optional[Dict[str, str]] = None,
+    existing_meta: Optional[Dict[str, Any]] = None,
+    force_refresh: bool = False,
+) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
+    """
+    Ensure Vipr session cookies and upload metadata are available.
+
+    Prefers reusing existing cookies when they still yield valid metadata;
+    otherwise performs a fresh login.
+
+    Returns:
+        (cookies_dict, meta_dict) on success, or (None, None) on failure.
+    """
+    if not username or not password:
+        logger.error("Vipr credentials missing (username/password required)")
+        return None, None
+
+    # Try reusing an existing session first
+    if not force_refresh and existing_cookies:
+        client = create_resilient_client()
+        try:
+            apply_cookies(client, existing_cookies)
+            meta = get_vipr_metadata(client)
+            if meta and meta.get('upload_url') and meta.get('sess_id'):
+                cookies = cookies_to_dict(client.cookies) or dict(existing_cookies)
+                logger.info("Reused existing Vipr session cookies")
+                return cookies, meta
+            logger.info("Existing Vipr cookies expired or incomplete; re-authenticating")
+        except Exception as e:
+            logger.warning(f"Vipr session reuse failed: {e}")
+        finally:
+            client.close()
+
+    # Fresh login
+    client = create_resilient_client()
+    try:
+        logged_in = vipr_login(username, password, client=client)
+        if not logged_in:
+            return None, None
+
+        cookies = cookies_to_dict(logged_in.cookies)
+        meta = get_vipr_metadata(logged_in)
+        if not meta or not meta.get('upload_url'):
+            logger.error("Vipr login succeeded but metadata scrape failed")
+            return None, None
+
+        logger.info(
+            f"Vipr authenticated ({len(cookies)} cookies, "
+            f"sess_id={'yes' if meta.get('sess_id') else 'no'})"
+        )
+        return cookies, meta
+    except Exception as e:
+        logger.error(f"Vipr ensure_vipr_auth error: {e}")
+        return None, None
+    finally:
+        # vipr_login may return the same client; always close our local client
+        try:
+            client.close()
+        except Exception:
+            pass
 
 def create_vipr_gallery(client: httpx.Client, name):
     """Creates a new gallery via AJAX."""
@@ -446,14 +552,27 @@ class PixhostUploader(BaseUploader):
 class ViprUploader(BaseUploader):
     def __init__(self, file_path: str, monitor_callback: Any, 
                  upload_url: str, sess_id: str, 
-                 thumb_size: str, gallery_id: str = "0", client: httpx.Client = None):
+                 thumb_size: str, gallery_id: str = "0", client: httpx.Client = None,
+                 cookies: Optional[Dict[str, str]] = None):
         super().__init__(file_path, monitor_callback)
         self.upload_url = upload_url
         self.sess_id = sess_id
         self.thumb_size = thumb_size
         self.gallery_id = gallery_id if gallery_id else "0"
-        self.client = client if client else create_resilient_client()
-        
+        # parse_response uses sync .post() for XFS redirect follow-up.
+        # Never attach an AsyncClient here — use a sync client with session cookies.
+        self._owns_client = False
+        if client is not None and isinstance(client, httpx.Client):
+            self.client = client
+        else:
+            self.client = create_resilient_client()
+            self._owns_client = True
+            if cookies:
+                apply_cookies(self.client, cookies)
+            elif client is not None and hasattr(client, 'cookies'):
+                # Best-effort copy from async client cookies if a wrong type was passed
+                apply_cookies(self.client, cookies_to_dict(client.cookies))
+
         self.headers['Referer'] = config.VIPR_HOME_URL
         self.headers['Origin'] = config.VIPR_HOME_URL
 
@@ -529,3 +648,13 @@ class ViprUploader(BaseUploader):
             raise ValueError("Could not parse upload result page (No links found).")
             
         return img_url, thumb_url or img_url
+
+    def close(self) -> None:
+        super().close()
+        if getattr(self, '_owns_client', False) and self.client is not None:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+            self.client = None
+            self._owns_client = False

@@ -129,13 +129,26 @@ class UploadManager:
                 th = "600" if (is_first and cfg.get('turbo_cover')) else cfg['turbo_thumb']
                 # Note: We rely on the thread-local client having cookies if they were set globally, 
                 # or we re-login. For now, we assume simple upload or anonymous.
-                uploader = api.TurboUploader(fp, cb, config.TURBO_HOME_URL, api.generate_turbo_upload_id(), cfg['turbo_content'], th, cfg['turbo_gal_id'], client=client)
+                uploader = api.TurboUploader(
+                    fp, cb, config.TURBO_HOME_URL, api.generate_turbo_upload_id(),
+                    cfg.get('turbo_content', 'Safe'), th, cfg.get('turbo_gal_id', ''),
+                    client=client
+                )
             
             elif service == "vipr.im":
-                # Vipr logic is complex with sessions. 
-                # Ideally pass session cookies in creds.
-                th = "800x800" if (is_first and cfg.get('vipr_cover')) else cfg['vipr_thumb']
-                uploader = api.ViprUploader(fp, cb, cfg.get('vipr_meta', {}).get('upload_url', config.VIPR_HOME_URL), "", th, cfg['vipr_gal_id'], client=client)
+                # Vipr needs session cookies + sess_id / upload_url from vipr_meta.
+                th = "800x800" if (is_first and cfg.get('vipr_cover')) else cfg.get('vipr_thumb', '170x170')
+                vipr_meta = cfg.get('vipr_meta') or {}
+                vipr_cookies = cfg.get('vipr_cookies') or {}
+                api.apply_cookies(client, vipr_cookies)
+                uploader = api.ViprUploader(
+                    fp, cb,
+                    vipr_meta.get('upload_url', config.VIPR_HOME_URL),
+                    vipr_meta.get('sess_id', ''),
+                    th, cfg.get('vipr_gal_id', '0'),
+                    client=client,
+                    cookies=vipr_cookies,
+                )
 
             # Execute Upload with retry logic
             if uploader:

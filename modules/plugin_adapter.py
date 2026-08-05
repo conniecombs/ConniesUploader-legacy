@@ -156,6 +156,20 @@ class ServiceRegistry:
 
         return {}
 
+    def get_plugin_metadata(self, service_name: str) -> Optional[Dict]:
+        """
+        Get metadata for a plugin service (convenience alias).
+
+        Args:
+            service_name: Name of plugin service
+
+        Returns:
+            Plugin metadata dictionary, or None if not a plugin
+        """
+        if self.is_plugin_service(service_name):
+            return self.plugin_manager.get_plugin_metadata(service_name)
+        return None
+
     def get_service_metadata(self, service_name: str) -> Optional[Dict]:
         """
         Get metadata for a service.

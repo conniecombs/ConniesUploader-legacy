@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Result queue reassignment**: Starting an upload no longer replaces the result/progress queues. The UI keeps aliases to the original queue objects, so results were previously dropped and never shown or written to output files.
+- **Plugin uploads always failed**: Plugin adapters no longer double-upload via a dummy HTTP POST after a successful plugin upload. Plugins use a dedicated `upload_via_plugin()` path.
+- **UnboundLocalError on upload failure**: `uploader` is initialized before the try block so cleanup cannot raise `UnboundLocalError`.
+- **Plugin tab metadata**: Plugin settings tabs now load metadata via `get_service_metadata` (with a `get_plugin_metadata` alias on the registry).
+- **Turbo gallery ID ignored**: Turbo gallery ID from the UI is gathered, saved, and restored with settings.
+- **Vipr session metadata not passed**: `vipr_meta` (upload URL / sess_id) is injected into the upload config at start time.
+- **Vipr auth cookies not transferred to async client**: Login cookies are stored as a plain dict, auto-refreshed via `ensure_vipr_auth` before upload, and applied to both the async upload client and a shared sync client used by `ViprUploader` for XFS redirect parsing. UI aliases stay in sync with `AppState.auth`.
+- **Upload history empty**: Per-file success/failure records are written into the active history session.
+
 ### Added
+- Regression tests for result-queue identity, plugin upload path, and history recording
 - Professional repository documentation and polish
 - LICENSE file (MIT)
 - CONTRIBUTING.md guide

@@ -130,9 +130,19 @@ class UploadCoordinator:
             self.state.upload.cancel_event.clear()
             self.state.results.results.clear()
 
-            # Reset result queue
-            self.state.queues.result_queue = queue.Queue()
+            # Clear progress/result queues in place (do NOT replace queue objects).
+            # main.py holds aliases to the original queue instances; replacing them
+            # would silently drop all upload results from the UI.
+            # Do not clear ui_queue — thumbnail add events may still be pending.
+            for q in (self.state.queues.progress_queue, self.state.queues.result_queue):
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+            # Keep upload_manager pointing at the same queue objects the UI reads
             self.upload_manager.result_queue = self.state.queues.result_queue
+            self.upload_manager.progress_queue = self.state.queues.progress_queue
 
             # Clear buffers
             self.pix_galleries_to_finalize.clear()

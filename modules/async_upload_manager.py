@@ -16,6 +16,8 @@ from .config_loader import get_config_loader
 from .error_handler import handle_upload_error, handle_network_error
 from .retry_utils import is_retryable_error
 from .plugin_adapter import get_service_registry
+from .upload_history import get_upload_history, UploadRecord
+from datetime import datetime
 from loguru import logger
 
 
@@ -64,33 +66,61 @@ class AsyncUploadManager:
         Creates an AsyncClient and runs concurrent uploads with controlled concurrency.
         """
         # Determine concurrency based on service
-        service_prefix = base_cfg['service'].split('.')[0]
-        if service_prefix == 'turboimagehost':
-            max_concurrent = base_cfg.get('turbo_threads', 2)
+        service = base_cfg['service']
+        if self.service_registry.is_plugin_service(service):
+            max_concurrent = self.service_registry.get_max_concurrent_uploads(service)
         else:
-            max_concurrent = base_cfg.get(f"{service_prefix}_threads", 2)
+            service_prefix = service.split('.')[0]
+            if service_prefix == 'turboimagehost':
+                max_concurrent = base_cfg.get('turbo_threads', 2)
+            else:
+                max_concurrent = base_cfg.get(f"{service_prefix}_threads", 2)
 
         logger.info(f"Starting async uploads with max_concurrent={max_concurrent}")
 
-        # Create async HTTP client
-        async with api.create_async_client() as client:
-            for group, files in pending_by_group.items():
-                if self.cancel_event.is_set():
-                    break
+        # Auth cookies for services that need them (Vipr, optionally Turbo later)
+        vipr_cookies = base_cfg.get('vipr_cookies') or {}
+        self._vipr_sync_client = None
 
-                # Prepare configuration for this group
-                current_cfg = base_cfg.copy()
-                current_pix_data = {}
+        try:
+            # Create async HTTP client with session cookies attached
+            async with api.create_async_client(
+                cookies=vipr_cookies if service == 'vipr.im' else None
+            ) as client:
+                # ViprUploader.parse_response needs a *sync* client for XFS redirects.
+                # Share one authenticated sync client for the whole batch.
+                if service == 'vipr.im':
+                    self._vipr_sync_client = api.create_resilient_client()
+                    api.apply_cookies(self._vipr_sync_client, vipr_cookies)
+                    if vipr_cookies:
+                        logger.info(f"Vipr session cookies applied to async+sync clients ({len(vipr_cookies)} cookies)")
+                    else:
+                        logger.warning("Vipr upload started without session cookies — uploads may fail")
 
-                # --- Gallery Creation Logic (sync operations) ---
-                await self._handle_gallery_creation(
-                    base_cfg, group, current_cfg, current_pix_data, creds, client
-                )
+                for group, files in pending_by_group.items():
+                    if self.cancel_event.is_set():
+                        break
 
-                # --- Concurrent File Uploads ---
-                await self._upload_files_concurrently(
-                    files, group, current_cfg, current_pix_data, creds, client, max_concurrent
-                )
+                    # Prepare configuration for this group
+                    current_cfg = base_cfg.copy()
+                    current_pix_data = {}
+
+                    # --- Gallery Creation Logic (sync operations) ---
+                    await self._handle_gallery_creation(
+                        base_cfg, group, current_cfg, current_pix_data, creds, client
+                    )
+
+                    # --- Concurrent File Uploads ---
+                    await self._upload_files_concurrently(
+                        files, group, current_cfg, current_pix_data, creds, client, max_concurrent
+                    )
+        finally:
+            if self._vipr_sync_client is not None:
+                try:
+                    self._vipr_sync_client.close()
+                except Exception:
+                    pass
+                self._vipr_sync_client = None
 
         logger.info("Async batch execution finished.")
 
@@ -165,6 +195,8 @@ class AsyncUploadManager:
             return
 
         self.progress_queue.put(('status', fp, 'Uploading'))
+        uploader = None
+        service = cfg.get('service', 'unknown')
 
         try:
             # Progress callback
@@ -176,11 +208,11 @@ class AsyncUploadManager:
 
             # Instantiate uploader (sync operation)
             uploader = self._create_uploader(
-                cfg['service'], fp, is_first, cfg, pix_data, progress_callback, client
+                service, fp, is_first, cfg, pix_data, progress_callback, client
             )
 
             if not uploader:
-                raise Exception(f"Unsupported service: {cfg['service']}")
+                raise Exception(f"Unsupported service: {service}")
 
             # Perform async upload with retry
             img, thumb = await self._perform_async_upload(uploader, fp, cfg, client)
@@ -188,17 +220,42 @@ class AsyncUploadManager:
             # Success
             self.result_queue.put((fp, img, thumb))
             self.progress_queue.put(('status', fp, 'Done'))
+            self._record_history(fp, service, img, thumb, 'success', cfg)
 
         except Exception as e:
             self.progress_queue.put(('status', fp, 'Failed'))
+            self._record_history(fp, service, None, None, 'failed', cfg, error_message=str(e))
             handle_upload_error(
                 error=e,
                 file_path=fp,
-                service=cfg.get('service', 'unknown')
+                service=service
             )
         finally:
             if uploader:
                 uploader.close()
+
+    def _record_history(self, fp, service, img, thumb, status, cfg, error_message=None):
+        """Record a per-file result in the active upload history session."""
+        try:
+            file_size = None
+            try:
+                file_size = os.path.getsize(fp)
+            except OSError:
+                pass
+
+            get_upload_history().add_record(UploadRecord(
+                file_path=fp,
+                service=service,
+                image_url=img,
+                thumbnail_url=thumb,
+                gallery_id=cfg.get('gallery_id') or cfg.get('pix_gallery_hash') or cfg.get('turbo_gal_id') or cfg.get('vipr_gal_id'),
+                status=status,
+                timestamp=datetime.now().isoformat(),
+                error_message=error_message,
+                file_size=file_size,
+            ))
+        except Exception as e:
+            logger.debug(f"Failed to record upload history for {fp}: {e}")
 
     def _create_uploader(self, service, fp, is_first, cfg, pix_data, callback, client):
         """Create appropriate uploader instance based on service."""
@@ -226,21 +283,26 @@ class AsyncUploadManager:
             )
 
         elif service == "turboimagehost":
-            th = "600" if (is_first and cfg.get('turbo_cover')) else cfg['turbo_thumb']
+            th = "600" if (is_first and cfg.get('turbo_cover')) else cfg.get('turbo_thumb', '180')
             return api.TurboUploader(
                 fp, callback, config.TURBO_HOME_URL,
                 api.generate_turbo_upload_id(),
-                cfg['turbo_content'], th, cfg['turbo_gal_id'],
+                cfg.get('turbo_content', 'Safe'), th, cfg.get('turbo_gal_id', ''),
                 client=client
             )
 
         elif service == "vipr.im":
-            th = "800x800" if (is_first and cfg.get('vipr_cover')) else cfg['vipr_thumb']
+            th = "800x800" if (is_first and cfg.get('vipr_cover')) else cfg.get('vipr_thumb', '170x170')
+            vipr_meta = cfg.get('vipr_meta') or {}
+            vipr_cookies = cfg.get('vipr_cookies') or {}
+            # Prefer shared batch sync client (authenticated); never pass AsyncClient
+            sync_client = getattr(self, '_vipr_sync_client', None)
             return api.ViprUploader(
                 fp, callback,
-                cfg.get('vipr_meta', {}).get('upload_url', config.VIPR_HOME_URL),
-                "", th, cfg['vipr_gal_id'],
-                client=client
+                vipr_meta.get('upload_url', config.VIPR_HOME_URL),
+                vipr_meta.get('sess_id', ''), th, cfg.get('vipr_gal_id', '0'),
+                client=sync_client,
+                cookies=vipr_cookies if sync_client is None else None,
             )
 
         return None
@@ -268,7 +330,14 @@ class AsyncUploadManager:
         Perform async HTTP upload with retry logic.
 
         Retries on network errors with exponential backoff.
+
+        Plugins handle their own HTTP inside PluginUploaderAdapter and must not
+        go through the shared client.post path (that would double-upload and fail).
         """
+        # Plugin path: upload is self-contained; no shared HTTP POST.
+        if isinstance(uploader, PluginUploaderAdapter):
+            return await asyncio.to_thread(uploader.upload_via_plugin)
+
         url, data, headers = uploader.get_request_params()
 
         # Add Content-Length if not present
@@ -282,6 +351,16 @@ class AsyncUploadManager:
         for attempt in range(1, max_attempts + 1):
             try:
                 self.progress_queue.put(('status', fp, 'Uploading'))
+
+                # On retry, rewind multipart stream if supported
+                if attempt > 1 and hasattr(data, 'seek'):
+                    try:
+                        data.seek(0)
+                    except Exception:
+                        # Stream may not be seekable; re-build request params
+                        url, data, headers = uploader.get_request_params()
+                        if 'Content-Length' not in headers and hasattr(data, 'len'):
+                            headers['Content-Length'] = str(data.len)
 
                 # Read data chunks (async generator)
                 async def read_chunks():
@@ -301,8 +380,15 @@ class AsyncUploadManager:
                     timeout=_app_config.network.upload_timeout_seconds
                 )
 
-                # Parse response
-                resp_data = response.text if service == 'vipr.im' else response.json()
+                # Parse response — vipr returns HTML; others return JSON
+                if service == 'vipr.im':
+                    resp_data = response.text
+                else:
+                    try:
+                        resp_data = response.json()
+                    except Exception:
+                        resp_data = response.text
+
                 img, thumb = uploader.parse_response(resp_data)
 
                 return img, thumb
@@ -323,8 +409,9 @@ class PluginUploaderAdapter:
     """
     Adapter to make plugin uploaders compatible with the existing uploader interface.
 
-    Plugins use a different interface than built-in uploaders, so this adapter
-    translates between the two.
+    Plugins own their HTTP client and upload flow. Call upload_via_plugin() once
+    (from the async manager plugin path) — do not feed this adapter through the
+    shared get_request_params() + client.post() pipeline.
     """
 
     def __init__(self, plugin, file_path, progress_callback):
@@ -341,30 +428,30 @@ class PluginUploaderAdapter:
         self.progress_callback = progress_callback
         self._result = None
 
-    def get_request_params(self):
+    def upload_via_plugin(self):
         """
-        Get upload request parameters.
+        Run the plugin upload and return (image_url, thumb_url).
 
-        For plugins, we perform the upload directly in this method
-        and store the result for later retrieval by parse_response().
-
-        This is a workaround to adapt the plugin interface to the existing
-        uploader interface which expects separate get_request_params() and
-        parse_response() calls.
-
-        Returns:
-            Dummy values (upload is already done)
+        This is the only path that should perform network I/O for plugins.
         """
         try:
-            # Plugins handle upload internally, so we call upload here
             self._result = self.plugin.upload(self.file_path, self._progress_wrapper)
-
-            # Return dummy values since upload is already done
-            return ("https://dummy.com", b"", {})
-
+            if not self._result:
+                raise Exception("Plugin upload failed: no result available")
+            return (self._result.image_url, self._result.thumb_url)
         except Exception as e:
             logger.error(f"Plugin upload failed: {e}")
             raise
+
+    def get_request_params(self):
+        """
+        Not used for plugins. Kept for interface compatibility; raises if called
+        so accidental use of the shared HTTP path fails loudly.
+        """
+        raise RuntimeError(
+            "PluginUploaderAdapter does not support get_request_params(); "
+            "use upload_via_plugin() instead"
+        )
 
     def _progress_wrapper(self, bytes_sent, total_bytes):
         """Wrap plugin progress callback to match expected interface."""
@@ -379,18 +466,7 @@ class PluginUploaderAdapter:
             self.progress_callback(monitor)
 
     def parse_response(self, response_data):
-        """
-        Parse upload response.
-
-        Since the upload was already done in get_request_params(),
-        we just return the stored result here.
-
-        Args:
-            response_data: Ignored (upload already done)
-
-        Returns:
-            Tuple of (image_url, thumb_url)
-        """
+        """Return stored result if upload_via_plugin() already ran."""
         if self._result:
             return (self._result.image_url, self._result.thumb_url)
 

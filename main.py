@@ -125,7 +125,10 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.turbo_cookies = self.app_state.auth.turbo_cookies
         self.turbo_endpoint = self.app_state.auth.turbo_endpoint
         self.turbo_upload_id = self.app_state.auth.turbo_upload_id
+        # Vipr auth — prefer dict cookies (transferable to async client).
+        # Keep aliases; mutations go through _set_vipr_auth() so app_state stays in sync.
         self.vipr_session = self.app_state.auth.vipr_session
+        self.vipr_cookies = self.app_state.auth.vipr_cookies
         self.vipr_meta = self.app_state.auth.vipr_meta
         self.vipr_galleries_map = self.app_state.auth.vipr_galleries_map
         self.upload_total = self.app_state.upload.upload_total
@@ -367,6 +370,15 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         ctk.CTkButton(btn_frame, text="Save All", command=save_all).pack(side="right", padx=5)
         ctk.CTkButton(btn_frame, text="Cancel", command=dlg.destroy, fg_color="gray").pack(side="right")
 
+    def _set_vipr_auth(self, cookies, meta, galleries_map=None):
+        """Keep UI aliases and AppState.auth in sync for Vipr session data."""
+        self.app_state.auth.set_vipr_auth(cookies, meta, galleries_map=galleries_map)
+        self.vipr_cookies = self.app_state.auth.vipr_cookies
+        self.vipr_meta = self.app_state.auth.vipr_meta
+        self.vipr_session = self.app_state.auth.vipr_session
+        # galleries_map is the same dict object as app_state.auth.vipr_galleries_map
+        self.vipr_galleries_map = self.app_state.auth.vipr_galleries_map
+
     def refresh_vipr_galleries(self, select_id=None):
         if not self.creds['vipr_user']:
             messagebox.showerror("Error", "Vipr credentials missing.")
@@ -374,28 +386,42 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         def _refresh():
             try:
                 self.log("Vipr: Logging in...")
-                client = api.create_resilient_client() # Direct API call
-                self.vipr_session = api.vipr_login(self.creds['vipr_user'], self.creds['vipr_pass'], client=client)
-                if not self.vipr_session: return
-                
-                self.log("Vipr: Fetching metadata...")
-                meta = api.get_vipr_metadata(self.vipr_session)
-                if meta and meta['galleries']:
-                    self.vipr_galleries_map = {g['name']: g['id'] for g in meta['galleries']}
-                    gal_names = ["None"] + list(self.vipr_galleries_map.keys())
-                    
-                    def update_cb():
-                        self.cb_vipr_gallery.configure(values=gal_names)
-                        if select_id:
-                            found = next((n for n, i in self.vipr_galleries_map.items() if i == select_id), None)
-                            if found: self.cb_vipr_gallery.set(found)
-                        else:
-                            self.cb_vipr_gallery.set(gal_names[0])
-                    self.after(0, update_cb)
-                    self.vipr_meta = meta
+                cookies, meta = api.ensure_vipr_auth(
+                    self.creds['vipr_user'],
+                    self.creds['vipr_pass'],
+                    existing_cookies=self.vipr_cookies or self.app_state.auth.vipr_cookies,
+                    existing_meta=self.vipr_meta or self.app_state.auth.vipr_meta,
+                    force_refresh=True,
+                )
+                if not cookies or not meta:
+                    self.log("Vipr: Login failed.")
+                    return
+
+                galleries = {
+                    g['name']: g['id'] for g in (meta.get('galleries') or [])
+                }
+                self._set_vipr_auth(cookies, meta, galleries_map=galleries)
+
+                gal_names = ["None"] + list(self.vipr_galleries_map.keys())
+                def update_cb():
+                    self.cb_vipr_gallery.configure(values=gal_names)
+                    if select_id:
+                        found = next(
+                            (n for n, i in self.vipr_galleries_map.items() if i == select_id),
+                            None,
+                        )
+                        if found:
+                            self.cb_vipr_gallery.set(found)
+                    else:
+                        self.cb_vipr_gallery.set(gal_names[0] if gal_names else "None")
+                self.after(0, update_cb)
+
+                if galleries:
+                    self.log(f"Vipr: Loaded {len(galleries)} galleries (session cookies stored).")
                 else:
-                    self.log("Vipr: No galleries found.")
-            except Exception as e: self.log(f"Vipr Error: {e}")
+                    self.log("Vipr: Logged in (no galleries found).")
+            except Exception as e:
+                self.log(f"Vipr Error: {e}")
         threading.Thread(target=_refresh, daemon=True).start()
 
     def _create_layout(self):
@@ -574,7 +600,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 p = self.notebook.tab(plugin_name)
 
                 # Get metadata and credential fields for this plugin
-                metadata = self.service_registry.get_plugin_metadata(plugin_name)
+                metadata = self.service_registry.get_service_metadata(plugin_name)
                 cred_fields = self.service_registry.get_credential_fields(plugin_name)
 
                 # Display plugin info
@@ -708,6 +734,9 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.ent_pix_hash.delete(0, "end")
         self.ent_pix_hash.insert(0, s.get("pix_gallery_hash", ""))
 
+        self.ent_turbo_gal.delete(0, "end")
+        self.ent_turbo_gal.insert(0, s.get("turbo_gal_id", ""))
+
     def _safe_int(self, value, default=2):
         try:
             return int(value)
@@ -749,6 +778,7 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
             "vipr_links": self.var_vipr_links.get(),
             "vipr_threads": self._safe_int(self.var_vipr_threads.get(), 1),
             "vipr_gal_id": vipr_id,
+            "turbo_gal_id": self.ent_turbo_gal.get().strip(),
             "output_format": self.var_format.get(),
             "auto_copy": self.var_auto_copy.get(),
             "auto_gallery": self.var_auto_gallery.get(),
@@ -892,6 +922,42 @@ class UploaderApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.settings = cfg  # Update global settings for output generation
             self.settings_mgr.save(cfg)
             cfg['api_key'] = self.creds.get('imx_api', '')
+            # Session-only runtime state (not persisted)
+            if cfg.get('service') == 'vipr.im':
+                if not self.creds.get('vipr_user') or not self.creds.get('vipr_pass'):
+                    messagebox.showerror(
+                        "Vipr Credentials",
+                        "Vipr username/password required. Set them under Settings → Credentials.",
+                    )
+                    return
+                self.log("Vipr: Ensuring authenticated session...")
+                cookies, meta = api.ensure_vipr_auth(
+                    self.creds['vipr_user'],
+                    self.creds['vipr_pass'],
+                    existing_cookies=self.vipr_cookies or self.app_state.auth.vipr_cookies,
+                    existing_meta=self.vipr_meta or self.app_state.auth.vipr_meta,
+                )
+                if not cookies or not meta:
+                    messagebox.showerror(
+                        "Vipr Login Failed",
+                        "Could not authenticate with Vipr.im. Check credentials and try again.",
+                    )
+                    return
+                galleries = {
+                    g['name']: g['id'] for g in (meta.get('galleries') or [])
+                }
+                # Preserve existing gallery map if scrape returned none but we already have one
+                if not galleries and self.vipr_galleries_map:
+                    galleries = dict(self.vipr_galleries_map)
+                self._set_vipr_auth(cookies, meta, galleries_map=galleries)
+                cfg['vipr_cookies'] = cookies
+                cfg['vipr_meta'] = meta
+                # Refresh gallery id from current dropdown against latest map
+                vipr_gal_name = self.cb_vipr_gallery.get()
+                cfg['vipr_gal_id'] = self.vipr_galleries_map.get(vipr_gal_name, cfg.get('vipr_gal_id', '0'))
+            else:
+                cfg['vipr_meta'] = self.vipr_meta or {}
+                cfg['vipr_cookies'] = self.vipr_cookies or self.app_state.auth.vipr_cookies or {}
 
             # Start upload through coordinator (handles all business logic)
             if self.coordinator.start_upload(pending_by_group, cfg, self.creds):
